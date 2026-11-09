@@ -39,10 +39,12 @@ enum Lang {
     CLike,
     Rust,
     Hash,
+    Plain,
 }
 
 fn lang_of(path: &Path) -> Option<Lang> {
     let name = path.file_name()?.to_str()?;
+    let name = name.strip_suffix(".in").unwrap_or(name);
     let ext = name.rsplit_once('.').map(|(_, e)| e).unwrap_or("");
     match ext {
         "c" | "h" | "cc" | "cpp" | "cxx" | "hh" | "hpp" | "go" | "vala" | "js" | "ts" => {
@@ -50,6 +52,10 @@ fn lang_of(path: &Path) -> Option<Lang> {
         }
         "rs" => Some(Lang::Rust),
         "py" | "sh" | "bash" | "pl" | "rb" => Some(Lang::Hash),
+        "conf" | "service" | "socket" | "target" | "timer" | "path" | "mount" | "automount"
+        | "slice" | "scope" | "network" | "netdev" | "link" | "preset" | "rules" | "desktop" => {
+            Some(Lang::Plain)
+        }
         _ => None,
     }
 }
@@ -87,7 +93,8 @@ fn files(root: &Path) -> Vec<PathBuf> {
             let p = e.path();
             let Ok(ft) = e.file_type() else { continue };
             if ft.is_dir() {
-                if !skipped_dir(&e.file_name().to_string_lossy()) {
+                let n = e.file_name().to_string_lossy().into_owned();
+                if !n.starts_with('.') && !skipped_dir(&n) {
                     stack.push(p);
                 }
             } else if ft.is_file() && lang_of(&p).is_some() {
@@ -99,8 +106,25 @@ fn files(root: &Path) -> Vec<PathBuf> {
     out
 }
 
+/// Byte ranges of the lines of a config file that are not comments.
+fn config_lines(src: &str) -> Vec<(usize, usize)> {
+    let mut out = Vec::new();
+    let mut at = 0;
+    for line in src.split_inclusive('\n') {
+        let t = line.trim_start();
+        if !t.starts_with('#') && !t.starts_with(';') {
+            out.push((at, at + line.trim_end_matches('\n').len()));
+        }
+        at += line.len();
+    }
+    out
+}
+
 /// Byte ranges of the string literals in `src`, skipping comments.
 fn literals(src: &str, lang: Lang) -> Vec<(usize, usize)> {
+    if lang == Lang::Plain {
+        return config_lines(src);
+    }
     let b = src.as_bytes();
     let mut out = Vec::new();
     let mut i = 0;
@@ -182,8 +206,11 @@ fn changes(src: &str, lang: Lang) -> Vec<Change> {
     for (start, end) in literals(src, lang) {
         let mut i = start;
         while i < end {
-            let before_ok =
-                i == start || matches!(b[i - 1], b' ' | b':' | b'=' | b'\t' | b'(' | b',');
+            let before_ok = i == start
+                || matches!(
+                    b[i - 1],
+                    b' ' | b':' | b'=' | b'\t' | b'(' | b',' | b'|' | b'!' | b'-' | b'+' | b'@'
+                );
             let url = i >= 2 && &b[i - 2..i] == b":/";
             if b[i] == b'/' && before_ok && !url && !src[i..end].starts_with(BASE) {
                 if let Some((old, new)) = rewrite_at(&src[i..end]) {
@@ -403,6 +430,21 @@ mod tests {
         assert_eq!(fix(run, Lang::Hash), run);
         let done = "p = \"/overlayer/syshub/etc\"\n";
         assert_eq!(fix(done, Lang::Hash), done);
+    }
+
+    #[test]
+    fn config_files_outside_comments() {
+        let src = "# keeps /var/log\nd /var/log 0755 - - -\nExecStart=/usr/bin/foo\n";
+        let want = "# keeps /var/log\nd /overlayer/syshub/var/log 0755 - - -\nExecStart=/overlayer/syshub/bin/foo\n";
+        assert_eq!(fix(src, Lang::Plain), want);
+    }
+
+    #[test]
+    fn systemd_condition_prefixes() {
+        let src = "ConditionNeedsUpdate=|/var\nExecStart=-/usr/bin/true\n";
+        let want =
+            "ConditionNeedsUpdate=|/overlayer/syshub/var\nExecStart=-/overlayer/syshub/bin/true\n";
+        assert_eq!(fix(src, Lang::Plain), want);
     }
 
     #[test]
