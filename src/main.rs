@@ -94,10 +94,13 @@ fn files(root: &Path) -> Vec<PathBuf> {
             let Ok(ft) = e.file_type() else { continue };
             if ft.is_dir() {
                 let n = e.file_name().to_string_lossy().into_owned();
-                if !n.starts_with('.') && !skipped_dir(&n) {
+                if !n.starts_with('.') && !n.starts_with("mkosi") && !skipped_dir(&n) {
                     stack.push(p);
                 }
-            } else if ft.is_file() && lang_of(&p).is_some() {
+            } else if ft.is_file()
+                && lang_of(&p).is_some()
+                && !e.file_name().to_string_lossy().starts_with("mkosi")
+            {
                 out.push(p);
             }
         }
