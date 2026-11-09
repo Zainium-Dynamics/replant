@@ -26,10 +26,22 @@ Plan
 Paths built at run time can not be found this way. sys_resolver still
 covers those on the running system.
 
+Usage
+-----
+
+    replant map                         the path map
+    replant find <source-dir>           every path it would change, with file and line
+    replant patch <source-dir> -o 0001-zainium-paths.patch
+    replant verify <source-dir>         exits 1 if any hard-coded path is left
+
+It reads C, C++, Go, Vala, JavaScript, Rust, Python, shell, Perl and Ruby,
+and skips tests, docs, translations and vendored code.
+
 Status
 ------
 
-Early. "replant map" prints the path map. Scanning is not written yet.
+Early. Check every change in the patch before using it: a path inside a
+message or a comment-like string is changed too.
 
 License
 -------
