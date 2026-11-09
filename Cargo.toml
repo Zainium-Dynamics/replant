@@ -1,0 +1,9 @@
+[package]
+name = "replant"
+version = "0.1.0"
+edition = "2024"
+description = "Moves the hard-coded FHS paths in a source tree to the Zainium OS layout, as a patch"
+license = "GPL-3.0-only"
+repository = "https://github.com/Zainium-Dynamics/replant"
+
+[dependencies]

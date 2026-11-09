@@ -1,0 +1,37 @@
+replant
+=======
+
+Moves the hard-coded FHS paths in a source tree to the Zainium OS layout.
+
+Zainium OS has no /usr, /etc or /var at the root. Software written for the
+classic layout opens paths like /etc/passwd, so each package needs those
+paths changed before it is built. Doing that by hand is slow and easy to get
+wrong, and a blind sed can damage files.
+
+replant reads a source tree and writes a patch, not changes in place, so a
+person can read every change before it goes into a recipe.
+
+Plan
+----
+
+  1. Set the build system's own options first (--prefix, --sysconfdir,
+     --localstatedir, meson options), which fixes most paths with no patch.
+  2. Find paths only inside string literals in C, C++, Rust, Python and
+     shell, never in comments, docs or binary files.
+  3. Match whole path segments only, so /etcd or a URL is left alone.
+  4. Never touch /proc, /sys, /dev, /tmp, /run or /home.
+  5. Write 0001-zainium-paths.patch and a report of what changed and what
+     looked unsure.
+
+Paths built at run time can not be found this way. sys_resolver still
+covers those on the running system.
+
+Status
+------
+
+Early. "replant map" prints the path map. Scanning is not written yet.
+
+License
+-------
+
+GPL-3.0.
