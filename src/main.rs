@@ -21,6 +21,8 @@ const MAP: &[(&str, &str)] = &[
     ("/usr/lib", "/overlayer/syshub/lib"),
     ("/usr/share", "/overlayer/syshub/share"),
     ("/usr/include", "/overlayer/syshub/include"),
+    ("/usr/local", "/overlayer/syshub"),
+    ("/usr", "/overlayer/syshub"),
     (
         "/lib/firmware",
         "/overlayer/syshub/drivers/hardware/firmwares",
@@ -56,8 +58,25 @@ fn lang_of(path: &Path) -> Option<Lang> {
         | "slice" | "scope" | "network" | "netdev" | "link" | "preset" | "rules" | "desktop" => {
             Some(Lang::Plain)
         }
+        _ if is_man(name) => Some(Lang::Plain),
         _ => None,
     }
+}
+
+/// Man pages (`patch.man`, `ls.1`, `printf.3p`): they are installed, so their paths count.
+fn is_man(name: &str) -> bool {
+    let Some((_, ext)) = name.rsplit_once('.') else {
+        return false;
+    };
+    ext == "man"
+        || (ext.len() <= 3
+            && ext.starts_with(|c: char| ('1'..='9').contains(&c))
+            && ext[1..].chars().all(|c| c.is_ascii_lowercase()))
+}
+
+/// Doc folders are skipped except for their man pages.
+fn doc_dir(name: &str) -> bool {
+    matches!(name, "doc" | "docs" | "man")
 }
 
 /// Paths in tests, docs and translations are not changed.
@@ -84,8 +103,8 @@ fn skipped_dir(name: &str) -> bool {
 
 fn files(root: &Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
-    let mut stack = vec![root.to_path_buf()];
-    while let Some(dir) = stack.pop() {
+    let mut stack = vec![(root.to_path_buf(), false)];
+    while let Some((dir, man_only)) = stack.pop() {
         let Ok(entries) = fs::read_dir(&dir) else {
             continue;
         };
@@ -94,11 +113,17 @@ fn files(root: &Path) -> Vec<PathBuf> {
             let Ok(ft) = e.file_type() else { continue };
             if ft.is_dir() {
                 let n = e.file_name().to_string_lossy().into_owned();
-                if !n.starts_with('.') && !n.starts_with("mkosi") && !skipped_dir(&n) {
-                    stack.push(p);
+                if n.starts_with('.') || n.starts_with("mkosi") {
+                    continue;
+                }
+                if !skipped_dir(&n) {
+                    stack.push((p, man_only));
+                } else if doc_dir(&n) {
+                    stack.push((p, true));
                 }
             } else if ft.is_file()
                 && lang_of(&p).is_some()
+                && (!man_only || is_man(&e.file_name().to_string_lossy()))
                 && !e.file_name().to_string_lossy().starts_with("mkosi")
             {
                 out.push(p);
@@ -115,7 +140,7 @@ fn config_lines(src: &str) -> Vec<(usize, usize)> {
     let mut at = 0;
     for line in src.split_inclusive('\n') {
         let t = line.trim_start();
-        if !t.starts_with('#') && !t.starts_with(';') {
+        if !t.starts_with('#') && !t.starts_with(';') && !t.starts_with(".\\\"") {
             out.push((at, at + line.trim_end_matches('\n').len()));
         }
         at += line.len();
