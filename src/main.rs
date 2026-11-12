@@ -88,9 +88,33 @@ fn doc_dir(name: &str) -> bool {
     matches!(name, "doc" | "docs" | "man")
 }
 
-/// Test files: `passwd_test.go`, `test_main.py`.
+/// Test files (`passwd_test.go`, `test_main.py`) and the build system's own scripts, which
+/// run on the build machine and are never installed.
 fn is_test_file(name: &str) -> bool {
-    name.ends_with("_test.go") || (name.starts_with("test_") && name.ends_with(".py"))
+    name.ends_with("_test.go")
+        || (name.starts_with("test_") && name.ends_with(".py"))
+        || matches!(
+            name,
+            "configure"
+                | "config.guess"
+                | "config.sub"
+                | "config.status"
+                | "config.rpath"
+                | "install-sh"
+                | "install.sh"
+                | "ltmain.sh"
+                | "missing"
+                | "depcomp"
+                | "compile"
+                | "test-driver"
+                | "ar-lib"
+                | "mkinstalldirs"
+                | "py-compile"
+                | "ylwrap"
+                | "bootstrap"
+                | "autogen.sh"
+                | "build.sh"
+        )
 }
 
 /// Paths in tests, docs and translations are not changed.
@@ -100,6 +124,10 @@ fn skipped_dir(name: &str) -> bool {
         || matches!(
             name,
             ".git"
+                | "build-aux"
+                | "autom4te.cache"
+                | "ci"
+                | "regress"
                 | "test"
                 | "tests"
                 | "testsuite"
