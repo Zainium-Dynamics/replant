@@ -11,17 +11,24 @@ wrong, and a blind sed can damage files.
 replant reads a source tree and writes a patch, not changes in place, so a
 person can read every change before it goes into a recipe.
 
-Plan
-----
+How it works
+------------
 
   1. Set the build system's own options first (--prefix, --sysconfdir,
      --localstatedir, meson options), which fixes most paths with no patch.
-  2. Find paths only inside string literals in C, C++, Rust, Python and
-     shell, never in comments, docs or binary files.
-  3. Match whole path segments only, so /etcd or a URL is left alone.
-  4. Never touch /proc, /sys, /dev, /tmp, /run or /home.
-  5. Write 0001-zainium-paths.patch and a report of what changed and what
-     looked unsure.
+  2. Read every file that gets installed: C, C++, Go, Vala, JavaScript, Rust,
+     Python, shell, Perl, Ruby, config and unit files, man pages (.1 to .9,
+     .man, .nro) and scripts known by their #! line.
+  3. Change every old path in those files, comments and shebangs included:
+     Zainium's package builder refuses a package that still names /usr
+     anywhere.
+  4. Match whole path segments only, so /etcd or a URL is left alone.
+  5. Never touch /proc, /sys, /dev, /tmp, /run or /home.
+  6. Write 0001-zainium-paths.patch for the recipe.
+
+It skips tests, docs (except man pages), translations, vendored code and the
+build system's own scripts (configure, config.guess, install-sh, build-aux),
+which run on the build machine and are never installed.
 
 Paths built at run time can not be found this way. sys_resolver still
 covers those on the running system.
@@ -34,14 +41,12 @@ Usage
     replant patch <source-dir> -o 0001-zainium-paths.patch
     replant verify <source-dir>         exits 1 if any hard-coded path is left
 
-It reads C, C++, Go, Vala, JavaScript, Rust, Python, shell, Perl and Ruby,
-and skips tests, docs, translations and vendored code.
-
 Status
 ------
 
-Early. Check every change in the patch before using it: a path inside a
-message or a comment-like string is changed too.
+Used for the recipes in syshub-recipes and userland-recipes. Read the patch
+before using it: a path in a message or a help text is changed too, which is
+what the package builder wants, but it is worth a look.
 
 License
 -------

@@ -219,12 +219,15 @@ fn changes(src: &str) -> Vec<Change> {
                 // roff font escapes in man pages: \fB/usr/bin/foo\fP
                 || (i >= start + 3 && b[i - 3] == b'\\' && b[i - 2] == b'f');
             let url = i >= 2 && &b[i - 2..i] == b":/";
-            if b[i] == b'/' && before_ok && !url && !src[i..end].starts_with(BASE) {
-                if let Some((old, new)) = rewrite_at(&src[i..end]) {
-                    out.push(Change { at: i, old, new });
-                    i += old.len();
-                    continue;
-                }
+            if b[i] == b'/'
+                && before_ok
+                && !url
+                && !src[i..end].starts_with(BASE)
+                && let Some((old, new)) = rewrite_at(&src[i..end])
+            {
+                out.push(Change { at: i, old, new });
+                i += old.len();
+                continue;
             }
             i += 1;
         }
@@ -402,48 +405,46 @@ fn main() -> ExitCode {
 mod tests {
     use super::*;
 
-    fn fix(src: &str, lang: Lang) -> String {
-        apply(src, &changes(src, lang))
+    fn fix(src: &str) -> String {
+        apply(src, &changes(src))
     }
 
     #[test]
-    fn moves_paths_in_strings_only() {
-        let src = "// reads /etc/passwd\nconst char *p = \"/etc/passwd\";\n";
-        let want = "// reads /etc/passwd\nconst char *p = \"/overlayer/syshub/etc/passwd\";\n";
-        assert_eq!(fix(src, Lang::CLike), want);
+    fn strings_comments_and_shebangs() {
+        let src = "#!/usr/bin/env python3\n# reads /etc/passwd\np = \"/etc/passwd\"\n";
+        let want = "#!/overlayer/syshub/bin/env python3\n# reads /overlayer/syshub/etc/passwd\np = \"/overlayer/syshub/etc/passwd\"\n";
+        assert_eq!(fix(src), want);
     }
 
     #[test]
     fn whole_segments_and_longest_prefix() {
+        assert_eq!(fix("x = \"/etcd/conf\"\n"), "x = \"/etcd/conf\"\n");
         assert_eq!(
-            fix("x = \"/etcd/conf\"\n", Lang::Hash),
-            "x = \"/etcd/conf\"\n"
-        );
-        assert_eq!(
-            fix("x = \"/usr/local/share/a\"\n", Lang::Hash),
+            fix("x = \"/usr/local/share/a\"\n"),
             "x = \"/overlayer/syshub/share/a\"\n"
         );
         assert_eq!(
-            fix("x = \"/lib/firmware\"\n", Lang::Hash),
+            fix("x = \"/lib/firmware\"\n"),
             "x = \"/overlayer/syshub/drivers/hardware/firmwares\"\n"
         );
+        assert_eq!(fix("cd /usr/src/x\n"), "cd /overlayer/syshub/src/x\n");
     }
 
     #[test]
     fn leaves_urls_runtime_dirs_and_done_paths() {
         let url = "u = \"https://x.org/etc/a\"\n";
-        assert_eq!(fix(url, Lang::Hash), url);
+        assert_eq!(fix(url), url);
         let run = "p = \"/proc/self\" ; q = \"/tmp/x\"\n";
-        assert_eq!(fix(run, Lang::Hash), run);
+        assert_eq!(fix(run), run);
         let done = "p = \"/overlayer/syshub/etc\"\n";
-        assert_eq!(fix(done, Lang::Hash), done);
+        assert_eq!(fix(done), done);
     }
 
     #[test]
-    fn config_files_outside_comments() {
-        let src = "# keeps /var/log\nd /var/log 0755 - - -\nExecStart=/usr/bin/foo\n";
-        let want = "# keeps /var/log\nd /overlayer/syshub/var/log 0755 - - -\nExecStart=/overlayer/syshub/bin/foo\n";
-        assert_eq!(fix(src, Lang::Plain), want);
+    fn config_lines_and_shell_words() {
+        let src = "d /var/log 0755 - - -\nExecStart=/usr/bin/foo\n/usr/bin/tic -x\nfor i in /usr/bin /bin; do\n";
+        let want = "d /overlayer/syshub/var/log 0755 - - -\nExecStart=/overlayer/syshub/bin/foo\n/overlayer/syshub/bin/tic -x\nfor i in /overlayer/syshub/bin /overlayer/syshub/bin; do\n";
+        assert_eq!(fix(src), want);
     }
 
     #[test]
@@ -451,15 +452,31 @@ mod tests {
         let src = "ConditionNeedsUpdate=|/var\nExecStart=-/usr/bin/true\n";
         let want =
             "ConditionNeedsUpdate=|/overlayer/syshub/var\nExecStart=-/overlayer/syshub/bin/true\n";
-        assert_eq!(fix(src, Lang::Plain), want);
+        assert_eq!(fix(src), want);
+    }
+
+    #[test]
+    fn man_page_font_escapes() {
+        assert_eq!(
+            fix("found at \\fB/usr/lib/foo\\fP\n"),
+            "found at \\fB/overlayer/syshub/lib/foo\\fP\n"
+        );
     }
 
     #[test]
     fn path_lists() {
         assert_eq!(
-            fix("PATH=\"/bin:/usr/bin\"\n", Lang::Hash),
+            fix("PATH=\"/bin:/usr/bin\"\n"),
             "PATH=\"/overlayer/syshub/bin:/overlayer/syshub/bin\"\n"
         );
+    }
+
+    #[test]
+    fn which_files_are_read() {
+        assert!(is_man("ls.1") && is_man("printf.3p") && is_man("less.nro") && is_man("patch.man"));
+        assert!(!is_man("file.c") && !is_man("v1.10"));
+        assert!(is_test_file("passwd_test.go") && is_test_file("configure"));
+        assert!(skipped_dir("kitty_tests") && skipped_dir("build-aux") && !skipped_dir("src"));
     }
 
     #[test]
