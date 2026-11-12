@@ -68,7 +68,7 @@ fn is_man(name: &str) -> bool {
     let Some((_, ext)) = name.rsplit_once('.') else {
         return false;
     };
-    ext == "man"
+    matches!(ext, "man" | "nro" | "roff" | "mdoc")
         || (ext.len() <= 3
             && ext.starts_with(|c: char| ('1'..='9').contains(&c))
             && ext[1..].chars().all(|c| c.is_ascii_lowercase()))
