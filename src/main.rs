@@ -74,31 +74,47 @@ fn is_man(name: &str) -> bool {
             && ext[1..].chars().all(|c| c.is_ascii_lowercase()))
 }
 
+/// A file's language by name, or a script by its #! line (`bin/kitty`, `configure`).
+fn lang_for(path: &Path) -> Option<Lang> {
+    lang_of(path).or_else(|| {
+        let mut head = [0u8; 2];
+        let n = fs::File::open(path).and_then(|mut f| std::io::Read::read(&mut f, &mut head));
+        (n.ok() == Some(2) && &head == b"#!").then_some(Lang::Hash)
+    })
+}
+
 /// Doc folders are skipped except for their man pages.
 fn doc_dir(name: &str) -> bool {
     matches!(name, "doc" | "docs" | "man")
 }
 
+/// Test files: `passwd_test.go`, `test_main.py`.
+fn is_test_file(name: &str) -> bool {
+    name.ends_with("_test.go") || (name.starts_with("test_") && name.ends_with(".py"))
+}
+
 /// Paths in tests, docs and translations are not changed.
 fn skipped_dir(name: &str) -> bool {
-    matches!(
-        name,
-        ".git"
-            | "test"
-            | "tests"
-            | "testsuite"
-            | "doc"
-            | "docs"
-            | "po"
-            | "man"
-            | "examples"
-            | "target"
-            | "build"
-            | "builddir"
-            | "vendor"
-            | "third_party"
-            | "3rdparty"
-    )
+    name.ends_with("_tests")
+        || name.ends_with("_test")
+        || matches!(
+            name,
+            ".git"
+                | "test"
+                | "tests"
+                | "testsuite"
+                | "doc"
+                | "docs"
+                | "po"
+                | "man"
+                | "examples"
+                | "target"
+                | "build"
+                | "builddir"
+                | "vendor"
+                | "third_party"
+                | "3rdparty"
+        )
 }
 
 fn files(root: &Path) -> Vec<PathBuf> {
@@ -122,8 +138,9 @@ fn files(root: &Path) -> Vec<PathBuf> {
                     stack.push((p, true));
                 }
             } else if ft.is_file()
-                && lang_of(&p).is_some()
+                && lang_for(&p).is_some()
                 && (!man_only || is_man(&e.file_name().to_string_lossy()))
+                && !is_test_file(&e.file_name().to_string_lossy())
                 && !e.file_name().to_string_lossy().starts_with("mkosi")
             {
                 out.push(p);
@@ -231,7 +248,12 @@ struct Change {
 fn changes(src: &str, lang: Lang) -> Vec<Change> {
     let b = src.as_bytes();
     let mut out = Vec::new();
-    for (start, end) in literals(src, lang) {
+    let mut ranges = literals(src, lang);
+    // the #! line is a comment to the language but a path to the kernel
+    if src.starts_with("#!") {
+        ranges.insert(0, (2, src.find('\n').unwrap_or(src.len())));
+    }
+    for (start, end) in ranges {
         let mut i = start;
         while i < end {
             let before_ok = i == start
@@ -318,7 +340,7 @@ fn scan(root: &Path) -> Vec<Found> {
         let Ok(src) = fs::read_to_string(&f) else {
             continue;
         };
-        let ch = changes(&src, lang_of(&f).unwrap());
+        let ch = changes(&src, lang_for(&f).unwrap());
         if !ch.is_empty() {
             let rel = f
                 .strip_prefix(root)
