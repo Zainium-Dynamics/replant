@@ -288,7 +288,10 @@ fn changes(src: &str, lang: Lang) -> Vec<Change> {
                 || matches!(
                     b[i - 1],
                     b' ' | b':' | b'=' | b'\t' | b'(' | b',' | b'|' | b'!' | b'-' | b'+' | b'@'
-                );
+                        | b'`' | b'"' | b'\'' | b'['
+                )
+                // roff font escapes in man pages: \fB/usr/bin/foo\fP
+                || (i >= start + 3 && b[i - 3] == b'\\' && b[i - 2] == b'f');
             let url = i >= 2 && &b[i - 2..i] == b":/";
             if b[i] == b'/' && before_ok && !url && !src[i..end].starts_with(BASE) {
                 if let Some((old, new)) = rewrite_at(&src[i..end]) {
