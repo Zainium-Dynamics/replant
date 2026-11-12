@@ -179,75 +179,11 @@ fn files(root: &Path) -> Vec<PathBuf> {
     out
 }
 
-/// Byte ranges of the lines of a config file that are not comments.
-fn config_lines(src: &str) -> Vec<(usize, usize)> {
-    let mut out = Vec::new();
-    let mut at = 0;
-    for line in src.split_inclusive('\n') {
-        let t = line.trim_start();
-        if !t.starts_with('#') && !t.starts_with(';') && !t.starts_with(".\\\"") {
-            out.push((at, at + line.trim_end_matches('\n').len()));
-        }
-        at += line.len();
-    }
-    out
-}
-
-/// Byte ranges of the string literals in `src`, skipping comments.
-fn literals(src: &str, lang: Lang) -> Vec<(usize, usize)> {
-    if lang == Lang::Plain {
-        return config_lines(src);
-    }
-    let b = src.as_bytes();
-    let mut out = Vec::new();
-    let mut i = 0;
-    while i < b.len() {
-        let c = b[i];
-        if lang != Lang::Hash && c == b'/' && b.get(i + 1) == Some(&b'/') {
-            while i < b.len() && b[i] != b'\n' {
-                i += 1;
-            }
-        } else if lang != Lang::Hash && c == b'/' && b.get(i + 1) == Some(&b'*') {
-            i += 2;
-            while i + 1 < b.len() && !(b[i] == b'*' && b[i + 1] == b'/') {
-                i += 1;
-            }
-            i += 2;
-        } else if lang == Lang::Hash && c == b'#' && (i == 0 || b[i - 1] != b'$') {
-            while i < b.len() && b[i] != b'\n' {
-                i += 1;
-            }
-        } else if c == b'"'
-            || (c == b'\'' && lang == Lang::Hash)
-            || (c == b'`' && lang == Lang::CLike)
-        {
-            let start = i + 1;
-            i += 1;
-            while i < b.len() && b[i] != c {
-                if b[i] == b'\\' && c != b'\'' && c != b'`' {
-                    i += 1;
-                }
-                if i < b.len() && b[i] == b'\n' && c == b'"' && lang != Lang::Hash {
-                    break;
-                }
-                i += 1;
-            }
-            out.push((start, i.min(b.len())));
-            i += 1;
-        } else if c == b'\'' && lang != Lang::Hash {
-            i += 1;
-            while i < b.len() && b[i] != b'\'' && b[i] != b'\n' {
-                if b[i] == b'\\' {
-                    i += 1;
-                }
-                i += 1;
-            }
-            i += 1;
-        } else {
-            i += 1;
-        }
-    }
-    out
+/// A change: byte offset in the file, old prefix, new prefix.
+struct Change {
+    at: usize,
+    old: &'static str,
+    new: &'static str,
 }
 
 fn is_name_byte(c: u8) -> bool {
@@ -266,28 +202,18 @@ fn rewrite_at(s: &str) -> Option<(&'static str, &'static str)> {
         .copied()
 }
 
-/// A change: byte offset in the file, old prefix, new prefix.
-struct Change {
-    at: usize,
-    old: &'static str,
-    new: &'static str,
-}
-
-fn changes(src: &str, lang: Lang) -> Vec<Change> {
+fn changes(src: &str) -> Vec<Change> {
     let b = src.as_bytes();
     let mut out = Vec::new();
-    let mut ranges = literals(src, lang);
-    // the #! line is a comment to the language but a path to the kernel
-    if src.starts_with("#!") {
-        ranges.insert(0, (2, src.find('\n').unwrap_or(src.len())));
-    }
-    for (start, end) in ranges {
+    // the whole file: an installed file must name no old path anywhere, comments,
+    // shebangs and a shell script's bare words included
+    for (start, end) in [(0, src.len())] {
         let mut i = start;
         while i < end {
             let before_ok = i == start
                 || matches!(
                     b[i - 1],
-                    b' ' | b':' | b'=' | b'\t' | b'(' | b',' | b'|' | b'!' | b'-' | b'+' | b'@'
+                    b' ' | b':' | b'=' | b'\t' | b'\n' | b'(' | b',' | b'|' | b'!' | b'-' | b'+' | b'@'
                         | b'`' | b'"' | b'\'' | b'['
                 )
                 // roff font escapes in man pages: \fB/usr/bin/foo\fP
@@ -371,7 +297,7 @@ fn scan(root: &Path) -> Vec<Found> {
         let Ok(src) = fs::read_to_string(&f) else {
             continue;
         };
-        let ch = changes(&src, lang_for(&f).unwrap());
+        let ch = changes(&src);
         if !ch.is_empty() {
             let rel = f
                 .strip_prefix(root)
